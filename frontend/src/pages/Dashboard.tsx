@@ -114,7 +114,7 @@ export default function Dashboard() {
   const [recovered, setRecovered] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    fetch('http://localhost:5000/api/leads')
+    fetch('https://leadrecover.onrender.com/api/leads')
       .then(r => r.json())
       .then(data => setLeads(data.map((l: Lead) => ({ ...l, lastMessage: lastMessages[l.id] }))))
       .catch(() => setError('Cannot connect to backend. Make sure it is running.'));
@@ -127,7 +127,7 @@ export default function Dashboard() {
     setError(null);
     setTranscriptOpen(false);
     try {
-      const res = await fetch(`http://localhost:5000/api/leads/recover/${leadId}`, { method: 'POST' });
+      const res = await fetch(`https://leadrecover.onrender.com/api/leads/recover/${leadId}`, { method: 'POST' });
       if (!res.ok) throw new Error(`Server error ${res.status}`);
       const data = await res.json();
       setResult(data);
