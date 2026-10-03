@@ -263,9 +263,27 @@ export default function Dashboard() {
                   </div>
 
                   {/* PHONE */}
-                  <div style={{ fontSize: 11, color: '#CBD5E1', fontFamily: 'monospace', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <PhoneIcon /> {lead.phone}
-                  </div>
+                  <div style={{ marginBottom: 10 }}>
+  <input
+    type="tel"
+    defaultValue={lead.phone}
+    onChange={(e) => {
+      const updated = leads.map(l => l.id === lead.id ? { ...l, phone: e.target.value } : l);
+      setLeads(updated);
+    }}
+    style={{
+      width: '100%',
+      padding: '6px 10px',
+      fontSize: 12,
+      fontFamily: 'monospace',
+      border: '1px solid #E2E8F0',
+      borderRadius: 6,
+      color: '#475569',
+      background: '#F8FAFC',
+    }}
+    placeholder="+234..."
+  />
+</div>
 
                   {/* DAYS AGO */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>

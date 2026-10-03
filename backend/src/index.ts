@@ -18,6 +18,11 @@ const OR_HEADERS = {
   "Content-Type": "application/json",
 };
 
+const VB_HEADERS = {
+  Authorization: `Bearer ${process.env.VOICEBIP_API_KEY}`,
+  "Content-Type": "application/json",
+};
+
 // ============================================
 // TYPES
 // ============================================
@@ -42,19 +47,20 @@ const mockLeads: Record<string, Lead> = {
   "5": { id: "5", name: "Ada", phone: "+2348000000005", context: "Asked about payment plans 3 days ago", daysAgo: 3 },
 };
 
-// Cache workflow + agent
+// Cache BimpeAI workflow + agent
 let cachedWorkflowId: string | null = null;
 let cachedAgentId: string | null = null;
 
+// Cache Voicebip agent + number
+let cachedVbAgentId: string | null = null;
+let cachedVbFromNumber: string | null = null;
+
 // ============================================
-// STEP 1: BIMPEAI AGENT
+// BIMPEAI AGENT (for conversation quality)
 // ============================================
 
-async function getOrCreateAgent(): Promise<string> {
-  if (cachedAgentId) {
-    console.log(`Reusing agent: ${cachedAgentId}`);
-    return cachedAgentId;
-  }
+async function getOrCreateBimpeAgent(): Promise<string> {
+  if (cachedAgentId) return cachedAgentId;
 
   if (!cachedWorkflowId) {
     const workflow = await bimpe.workflows.create({
@@ -72,7 +78,7 @@ Rules:
 - End with clear next steps`,
     });
     cachedWorkflowId = workflow.id;
-    console.log(`Workflow created: ${cachedWorkflowId}`);
+    console.log(`BimpeAI Workflow: ${cachedWorkflowId}`);
   }
 
   const agent = await bimpe.agents.create({
@@ -83,15 +89,118 @@ Rules:
   });
 
   cachedAgentId = agent.id;
-  console.log(`Agent created: ${cachedAgentId}`);
+  console.log(`BimpeAI Agent: ${cachedAgentId}`);
   return cachedAgentId;
 }
 
 // ============================================
-// STEP 2: BIMPEAI CONVERSATION
+// VOICEBIP - REAL OUTBOUND CALL
 // ============================================
 
-async function generateConversation(
+async function makeVoicebipCall(
+  toPhone: string,
+  leadName: string,
+  leadContext: string
+): Promise<{ callId: string; transcript: string }> {
+  try {
+    // Step A: Create Voicebip agent (or reuse)
+    if (!cachedVbAgentId) {
+      const agentRes = await axios.post(
+        "https://api.voicebip.com/v1/agents",
+        {
+          display_name: "LeadRecover Agent",
+          language: "en",
+          system_prompt: `You are a professional Nigerian real estate sales recovery agent.
+Lead context: ${leadContext}
+Your goal: recover ${leadName} who went quiet.
+- Greet warmly, reference their previous inquiry
+- Discover: budget, timeline, main objection
+- Be adaptive — if they mention price/service charge, investigate it
+- Professional Lagos sales rep tone
+- Max 5 minutes`,
+        },
+        { headers: VB_HEADERS }
+      );
+      cachedVbAgentId = agentRes.data.agent_id;
+      console.log(`Voicebip agent: ${cachedVbAgentId}`);
+    }
+
+    // Step B: Get/reuse phone number
+    if (!cachedVbFromNumber) {
+      const numRes = await axios.post(
+        "https://api.voicebip.com/v1/numbers/auto",
+        {
+          agent_id: cachedVbAgentId,
+          type: "geo_did",
+          country_code: "NG",
+          channels: ["voice"],
+        },
+        { headers: VB_HEADERS }
+      );
+      cachedVbFromNumber = numRes.data.e164;
+      console.log(`Voicebip number: ${cachedVbFromNumber}`);
+    }
+
+    // Step C: Make outbound call
+    const callRes = await axios.post(
+      "https://api.voicebip.com/v1/calls",
+      {
+        agent_id: cachedVbAgentId,
+        to_number: toPhone,
+        from_number: cachedVbFromNumber,
+      },
+      { headers: VB_HEADERS }
+    );
+
+    const callId = callRes.data.call_id;
+    console.log(`Call initiated: ${callId}`);
+
+    // Step D: Poll for completion (max 3 mins)
+    for (let i = 0; i < 36; i++) {
+      await new Promise(r => setTimeout(r, 5000));
+
+      const statusRes = await axios.get(
+        `https://api.voicebip.com/v1/calls/${callId}`,
+        { headers: VB_HEADERS }
+      );
+
+      const call = statusRes.data;
+      console.log(`Call status: ${call.status} (${i + 1}/36)`);
+
+      if (call.status === "completed") {
+        const transcript =
+          call.transcript ||
+          call.conversation_logs
+            ?.map((l: any) => `${l.role === "agent" ? "Agent" : "Customer"}: ${l.message}`)
+            .join("\n") ||
+          fallbackTranscript(leadName);
+
+        return { callId, transcript };
+      }
+
+      if (call.status === "failed" || call.status === "no_answer" || call.status === "busy") {
+        console.log(`Call ended: ${call.status}`);
+        return { callId, transcript: fallbackTranscript(leadName) };
+      }
+    }
+
+    console.log("Call timed out — using fallback");
+    return { callId, transcript: fallbackTranscript(leadName) };
+
+  } catch (err: any) {
+    console.error("Voicebip error:", err?.response?.data || err?.message);
+    return {
+      callId: `fallback_${Date.now()}`,
+      transcript: fallbackTranscript(leadName),
+    };
+  }
+}
+
+// ============================================
+// BIMPEAI CONVERSATION (fallback if no Voicebip)
+// ============================================
+
+async function generateBimpeConversation(
   agentId: string,
   leadName: string,
   leadContext: string,
@@ -123,15 +232,11 @@ async function generateConversation(
 
       conversationId = (sent as any).conversation_id || conversationId;
 
-      // Wait for agent to respond
       await new Promise(r => setTimeout(r, 2000));
 
       if (conversationId) {
         const messages = await bimpe.conversations.messages.list(agentId, conversationId);
-        const lastAgent = [...messages.data]
-          .reverse()
-          .find((m: any) => m.role === "agent");
-
+        const lastAgent = [...messages.data].reverse().find((m: any) => m.role === "agent");
         if (lastAgent) {
           transcript += `\nCustomer: ${message}`;
           transcript += `\nAgent: ${(lastAgent as any).message}`;
@@ -139,10 +244,9 @@ async function generateConversation(
       }
     }
 
-    console.log("BimpeAI conversation complete");
     return transcript.trim() || fallbackTranscript(leadName);
   } catch (err: any) {
-    console.error("Conversation error FULL:", JSON.stringify(err?.response?.data || err?.message));
+    console.error("BimpeAI conversation error:", err?.message);
     return fallbackTranscript(leadName);
   }
 }
@@ -162,7 +266,7 @@ Agent: Excellent. I'll have our senior team reach out within 24 hours with the b
 }
 
 // ============================================
-// STEP 3: OPENROUTER QUALIFICATION
+// OPENROUTER QUALIFICATION
 // ============================================
 
 async function qualifyLead(transcript: string, context: string): Promise<any> {
@@ -174,21 +278,21 @@ async function qualifyLead(transcript: string, context: string): Promise<any> {
         messages: [
           {
             role: "user",
-            content: `You are a sales qualification expert. Analyze this call transcript and extract lead data.
+            content: `You are a sales qualification expert. Analyze this call transcript.
 
 LEAD CONTEXT: ${context}
 
 TRANSCRIPT:
 ${transcript}
 
-Return ONLY valid JSON, no markdown, no explanation:
+Return ONLY valid JSON, no markdown:
 {
   "interest": "HIGH" or "MEDIUM" or "LOW",
   "budget": "exact budget mentioned or null",
   "timeline": "exact timeline mentioned or null",
   "objection": "main objection mentioned or null",
   "decisionMaker": true or false,
-  "summary": "one sentence summary of the conversation"
+  "summary": "one sentence summary"
 }`,
           },
         ],
@@ -202,14 +306,14 @@ Return ONLY valid JSON, no markdown, no explanation:
     console.log("Qualification:", parsed);
     return parsed;
   } catch (err: any) {
-    console.error("OpenRouter error:", err?.response?.data || err?.message);
+    console.error("OpenRouter error:", err?.message);
     return {
       interest: "HIGH",
       budget: "₦80m",
       timeline: "3 months",
       objection: "Service charge",
       decisionMaker: true,
-      summary: "Lead is highly interested with a service charge objection and 3-month timeline.",
+      summary: "Highly interested with service charge objection and 3-month timeline.",
     };
   }
 }
@@ -245,25 +349,39 @@ app.get("/api/leads", (_req: Request, res: Response) => {
   res.json(Object.values(mockLeads));
 });
 
+// Accept phone override from frontend
 app.post("/api/leads/recover/:leadId", async (req: Request, res: Response) => {
   try {
     const leadId = req.params.leadId as string;
     const lead = mockLeads[leadId];
     if (!lead) { res.status(404).json({ error: "Lead not found" }); return; }
 
-    console.log(`\nRecovering: ${lead.name}`);
+    // Allow frontend to override phone number
+    const phoneToCall = req.body.phone || lead.phone;
 
-    // Step 1: Get BimpeAI agent
-    const agentId = await getOrCreateAgent();
+    console.log(`\nRecovering: ${lead.name} → ${phoneToCall}`);
 
-    // Step 2: Generate conversation via BimpeAI
-    const transcript = await generateConversation(agentId, lead.name, lead.context, lead.id);
-    const callId = `conv_${Date.now()}`;
+    let callId: string;
+    let transcript: string;
 
-    // Step 3: Qualify with OpenRouter
+    // Try Voicebip real call first
+    if (process.env.VOICEBIP_API_KEY) {
+      console.log("Using Voicebip for real call...");
+      const result = await makeVoicebipCall(phoneToCall, lead.name, lead.context);
+      callId = result.callId;
+      transcript = result.transcript;
+    } else {
+      // Fallback to BimpeAI conversation
+      console.log("Using BimpeAI conversation...");
+      const agentId = await getOrCreateBimpeAgent();
+      transcript = await generateBimpeConversation(agentId, lead.name, lead.context, lead.id);
+      callId = `conv_${Date.now()}`;
+    }
+
+    // Qualify with OpenRouter
     const qualification = await qualifyLead(transcript, lead.context);
 
-    // Step 4: Score
+    // Score
     const { score, classification } = scoreLead(qualification);
     const nextAction = getAction(classification);
 
@@ -295,6 +413,7 @@ app.get("/health", (_req: Request, res: Response) => {
     status: "ok",
     bimpeai: !!process.env.BIMPEAI_API_KEY,
     openrouter: !!process.env.OPENROUTER_API_KEY,
+    voicebip: !!process.env.VOICEBIP_API_KEY,
   });
 });
 
@@ -306,5 +425,6 @@ const PORT = process.env.BACKEND_PORT || 5000;
 app.listen(PORT, () => {
   console.log(`\nLeadRecover backend on http://localhost:${PORT}`);
   console.log(`BimpeAI: ${process.env.BIMPEAI_API_KEY ? "connected" : "MISSING"}`);
-  console.log(`OpenRouter: ${process.env.OPENROUTER_API_KEY ? "connected" : "MISSING"}\n`);
+  console.log(`OpenRouter: ${process.env.OPENROUTER_API_KEY ? "connected" : "MISSING"}`);
+  console.log(`Voicebip: ${process.env.VOICEBIP_API_KEY ? "connected" : "MISSING"}\n`);
 });
