@@ -124,22 +124,34 @@ function CallSimulator() {
   const [idx, setIdx] = useState(0);
   const [done, setDone] = useState(false);
 
-  const start = () => { setActive(true); setLines([]); setIdx(0); setDone(false); };
+  const speak = (text: string, isAgent: boolean) => {
+    return new Promise<void>((resolve) => {
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'en-GB';
+      utter.rate = 0.9;
+      utter.pitch = isAgent ? 1.2 : 0.8;
+      utter.volume = 1;
+      utter.onend = () => resolve();
+      utter.onerror = () => resolve();
+      window.speechSynthesis.speak(utter);
+    });
+  };
 
-  useEffect(() => {
-    if (!active || idx >= CALL_SCRIPT.length) { if (active && idx >= CALL_SCRIPT.length) setDone(true); return; }
-    const delay = idx === 0 ? 800 : CALL_SCRIPT[idx-1].role === 'agent' ? 2200 : 1400;
-    const t = setTimeout(() => { const line = CALL_SCRIPT[idx];
-setLines(p => [...p, line]);
-setIdx(i => i+1);
-const utter = new SpeechSynthesisUtterance(line.text);
-utter.rate = 0.95;
-utter.pitch = line.role === 'agent' ? 1.1 : 0.9;
-utter.volume = 1;
-window.speechSynthesis.cancel();
-setTimeout(() => window.speechSynthesis.speak(utter), 100); }, delay);
-    return () => clearTimeout(t);
-  }, [active, idx]);
+  const start = async () => {
+    window.speechSynthesis.cancel();
+    setActive(true);
+    setLines([]);
+    setDone(false);
+    for (let i = 0; i < CALL_SCRIPT.length; i++) {
+      const line = CALL_SCRIPT[i];
+      setLines(p => [...p, line]);
+      await speak(line.text, line.role === 'agent');
+      await new Promise(r => setTimeout(r, 500));
+    }
+    setDone(true);
+    setActive(false);
+  };
 
   return (
     <div style={{background:'#0F172A',borderRadius:16,padding:28,marginBottom:24}}>
@@ -148,8 +160,8 @@ setTimeout(() => window.speechSynthesis.speak(utter), 100); }, delay);
           <p style={{color:'#F8FAFC',fontWeight:600,fontSize:15,margin:0}}>📞 Live Call Simulator</p>
           <p style={{color:'#64748B',fontSize:13,margin:'4px 0 0'}}>Watch Temi recover David in real time</p>
         </div>
-        <button onClick={start} style={{background:done?'#3B82F6':active?'#374151':'#3B82F6',color:'#fff',border:'none',borderRadius:8,padding:'8px 18px',fontSize:13,fontWeight:600,cursor:'pointer'}}>
-          {done ? '↺ Replay' : active ? 'Running...' : '▶ Start Call'}
+        <button onClick={start} disabled={active} style={{background:active?'#374151':'#3B82F6',color:'#fff',border:'none',borderRadius:8,padding:'8px 18px',fontSize:13,fontWeight:600,cursor:active?'not-allowed':'pointer'}}>
+          {done ? '↺ Replay' : active ? 'Speaking...' : '▶ Start Call'}
         </button>
       </div>
       <div style={{display:'flex',flexDirection:'column',gap:10,maxHeight:280,overflowY:'auto'}}>
