@@ -121,7 +121,7 @@ const CALL_SCRIPT = [
 function CallSimulator() {
   const [active, setActive] = useState(false);
   const [lines, setLines] = useState<{role:string;text:string}[]>([]);
-  const [idx, setIdx] = useState(0);
+    const [_idx, _setIdx] = useState(0);
   const [done, setDone] = useState(false);
 
   const speak = (text: string, isAgent: boolean) => {
