@@ -136,7 +136,8 @@ const utter = new SpeechSynthesisUtterance(line.text);
 utter.rate = 0.95;
 utter.pitch = line.role === 'agent' ? 1.1 : 0.9;
 utter.volume = 1;
-window.speechSynthesis.speak(utter); }, delay);
+window.speechSynthesis.cancel();
+setTimeout(() => window.speechSynthesis.speak(utter), 100); }, delay);
     return () => clearTimeout(t);
   }, [active, idx]);
 
