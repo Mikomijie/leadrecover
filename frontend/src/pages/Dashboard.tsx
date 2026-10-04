@@ -129,7 +129,14 @@ function CallSimulator() {
   useEffect(() => {
     if (!active || idx >= CALL_SCRIPT.length) { if (active && idx >= CALL_SCRIPT.length) setDone(true); return; }
     const delay = idx === 0 ? 800 : CALL_SCRIPT[idx-1].role === 'agent' ? 2200 : 1400;
-    const t = setTimeout(() => { setLines(p => [...p, CALL_SCRIPT[idx]]); setIdx(i => i+1); }, delay);
+    const t = setTimeout(() => { const line = CALL_SCRIPT[idx];
+setLines(p => [...p, line]);
+setIdx(i => i+1);
+const utter = new SpeechSynthesisUtterance(line.text);
+utter.rate = 0.95;
+utter.pitch = line.role === 'agent' ? 1.1 : 0.9;
+utter.volume = 1;
+window.speechSynthesis.speak(utter); }, delay);
     return () => clearTimeout(t);
   }, [active, idx]);
 
