@@ -102,7 +102,61 @@ const MessageIcon = () => (
     <path d="M14 2H2a1 1 0 00-1 1v8a1 1 0 001 1h3l2 2 2-2h5a1 1 0 001-1V3a1 1 0 00-1-1z"/>
   </svg>
 );
+const CALL_SCRIPT = [
+  { role: 'agent', text: "Hi, am I speaking with David? This is Temi from Property Experts Lagos." },
+  { role: 'customer', text: "Yes, this is David." },
+  { role: 'agent', text: "I'm calling about your 2-bedroom apartment enquiry. Are you still interested?" },
+  { role: 'customer', text: "Yes, still interested." },
+  { role: 'agent', text: "What budget range are you working with?" },
+  { role: 'customer', text: "Around 80 million naira." },
+  { role: 'agent', text: "And your timeline to complete the purchase?" },
+  { role: 'customer', text: "Within 3 months. But the service charge seems high." },
+  { role: 'agent', text: "That's something we can work with. Can I flag that for our senior team?" },
+  { role: 'customer', text: "Yes, that works." },
+  { role: 'agent', text: "Are you the main decision maker for this purchase?" },
+  { role: 'customer', text: "Yes, I handle all financial decisions." },
+  { role: 'agent', text: "Perfect. Our senior team will reach out within 24 hours. Thank you David!" },
+];
 
+function CallSimulator() {
+  const [active, setActive] = useState(false);
+  const [lines, setLines] = useState<{role:string;text:string}[]>([]);
+  const [idx, setIdx] = useState(0);
+  const [done, setDone] = useState(false);
+
+  const start = () => { setActive(true); setLines([]); setIdx(0); setDone(false); };
+
+  useEffect(() => {
+    if (!active || idx >= CALL_SCRIPT.length) { if (active && idx >= CALL_SCRIPT.length) setDone(true); return; }
+    const delay = idx === 0 ? 800 : CALL_SCRIPT[idx-1].role === 'agent' ? 2200 : 1400;
+    const t = setTimeout(() => { setLines(p => [...p, CALL_SCRIPT[idx]]); setIdx(i => i+1); }, delay);
+    return () => clearTimeout(t);
+  }, [active, idx]);
+
+  return (
+    <div style={{background:'#0F172A',borderRadius:16,padding:28,marginBottom:24}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+        <div>
+          <p style={{color:'#F8FAFC',fontWeight:600,fontSize:15,margin:0}}>📞 Live Call Simulator</p>
+          <p style={{color:'#64748B',fontSize:13,margin:'4px 0 0'}}>Watch Temi recover David in real time</p>
+        </div>
+        <button onClick={start} style={{background:done?'#3B82F6':active?'#374151':'#3B82F6',color:'#fff',border:'none',borderRadius:8,padding:'8px 18px',fontSize:13,fontWeight:600,cursor:'pointer'}}>
+          {done ? '↺ Replay' : active ? 'Running...' : '▶ Start Call'}
+        </button>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:10,maxHeight:280,overflowY:'auto'}}>
+        {lines.map((l,i) => (
+          <div key={i} style={{display:'flex',justifyContent:l.role==='agent'?'flex-start':'flex-end'}}>
+            <div style={{background:l.role==='agent'?'#1E3A5F':'#1E293B',border:`1px solid ${l.role==='agent'?'#3B82F6':'#334155'}`,borderRadius:10,padding:'8px 14px',maxWidth:'75%'}}>
+              <p style={{color:l.role==='agent'?'#93C5FD':'#CBD5E1',fontSize:11,margin:'0 0 3px',fontWeight:600}}>{l.role==='agent'?'Temi (Agent)':'David (Lead)'}</p>
+              <p style={{color:'#F8FAFC',fontSize:14,margin:0,lineHeight:1.5}}>{l.text}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 export default function Dashboard() {
   const navigate = useNavigate();
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -322,10 +376,10 @@ export default function Dashboard() {
                 <PhoneIcon />
               </div>
               <h3 style={{ fontSize: 16, fontWeight: 700, color: '#94A3B8', marginBottom: 6 }}>Select a lead to recover</h3>
-              <p style={{ fontSize: 13, color: '#CBD5E1', margin: 0 }}>Click any warm lead on the left to start</p>
+                           <p style={{ fontSize: 13, color: '#CBD5E1', margin: 0 }}>Click any warm lead on the left to start</p>
+                   <CallSimulator />
             </div>
           )}
-
           {loading && (
             <div style={{ background: 'white', border: '1px solid #E2E8F0', borderRadius: 16, padding: 48, textAlign: 'center', minHeight: 400, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
               <div style={{ color: '#136299', marginBottom: 20 }}><Spinner /></div>
